@@ -34,8 +34,9 @@ def directory_dict(path):
 # foo
 # foo/bar
 # baz
+#
+# traverse :: FilePath -> (FilePath -> IO ()) -> (FilePath -> IO ()) -> IO ()
 def traverse(path, on_file, on_dir):
-    print('traverse %s' % path)
     for child in os.listdir(path):
         fullpath = path + '/' + child
         if os.path.isfile(fullpath):
