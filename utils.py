@@ -55,3 +55,47 @@ def traverse_(root, relroot, on_file, on_dir):
         elif os.path.isdir(fullpath):
             on_dir(relpath)
             traverse_(root, relpath, on_file, on_file, on_dir)
+
+# foo.1.4
+class RawFilePiece:
+    def __init__(self, basename, numer, denom):
+        self.typ = 'raw'
+        self.basename = basename
+        self.numer = numer
+        self.denom = denom
+
+    def path(self):
+        return '%s.%d.%d' % (self.basename, self.numer, self.denom)
+
+# foo.xor1.4
+class XorFilePiece:
+    def __init__(self, basename, extra_bytes, denom):
+        self.typ = 'xor'
+        self.basename = basename
+        self.extra_bytes = extra_bytes
+        self.denom = denom
+
+    def path(self):
+        return '%s.xor%d.%d' % (self.basename, self.extra_bytes, self.denom)
+
+def fileToFilePiece(filename):
+    dirname = os.path.dirname(filename)
+    basename = os.path.basename(filename)
+    split_basename = basename.split('.')
+
+    if len(split_basename) < 3:
+        raise Exception('bad filename: ' + filename)
+
+    # foobar/foo.txt.1.4 -> foobar/foo.txt
+    orig_filename = os.path.join(dirname, ''.join(split_basename[:-2]))
+
+    if split_basename[-2].startswith('xor'):
+        return XorFilePiece(
+                orig_filename,
+                int(split_basename[-2][-1]),
+                int(split_basename[-1]))
+    else:
+        return RawFilePiece(
+                orig_filename,
+                int(split_basename[-2]),
+                int(split_basename[-1]))

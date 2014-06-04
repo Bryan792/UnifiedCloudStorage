@@ -1,12 +1,14 @@
+import os
 import sys
-
-def debug_rand(foo):
-    print('is rand')
+from utils import *
 
 def debug_xor(foo):
     print('is xor')
 
 if sys.argv[0] == 'debug-rand.py':
-    debug_rand(sys.argv[1:])
+    sys.stdout.write(os.urandom(int(sys.argv[1])))
 else:
-    debug_xor(sys.argv[1:])
+    fs = []
+    for f in sys.argv[1:]:
+        fs.append(open(f, 'r').read())
+    sys.stdout.write(xor_strings(*fs))
