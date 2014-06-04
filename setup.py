@@ -4,9 +4,11 @@ import ConfigParser
 import subprocess
 import os
 import subprocess
+import sys
 from subprocess import Popen
 
 def checkService(service):
+    provider = (ConfigSectionMap(service)['provider'])
     user = (ConfigSectionMap(service)['user'])
     password = (ConfigSectionMap(service)['password'])
     print user
@@ -14,22 +16,30 @@ def checkService(service):
     if not user and not password: 
        return 
     DBConfig = ConfigParser.ConfigParser()
-    if service == "Box":
+    if provider == "Box":
         DBConfig.read("/usr/lib/python2.7/site-packages/CloudFusion-5.10.16-py2.7.egg/cloudfusion/config/Webdav.ini")
     else:
-        DBConfig.read("/usr/lib/python2.7/site-packages/CloudFusion-5.10.16-py2.7.egg/cloudfusion/config/"+service+".ini")
+        DBConfig.read("/usr/lib/python2.7/site-packages/CloudFusion-5.10.16-py2.7.egg/cloudfusion/config/"+provider+".ini")
     DBConfig.set('auth','user',user)
     DBConfig.set('auth','password',password)
-    if service == "Box":
+    if provider == "Box":
         DBConfig.set('auth','url',"https://dav.box.com/dav")
+    elif provider == "Dropbox":
+        DBConfig.set('auth','consumer_key',"tmdmw3mh9ba199o")
+        DBConfig.set('auth','consumer_secret',"xqppu730x1f039r")
     with open('./'+service+'.ini', 'w') as configfile:
         DBConfig.write(configfile)
+    if not os.path.exists(service):
+        os.makedirs(service)
+    Popen(["cloudfusion","--config",service+'.ini',service])
 
 def checkSudo():
     user = os.getuid()
     if user != 0:
         print "This program requires root privileges.  Run as root using 'sudo'."
-        sys.exit()
+        return 
+    checkCloudFusion()
+    sys.exit()
 
 def checkCloudFusion():
     try:
@@ -62,7 +72,16 @@ def ConfigSectionMap(section):
 Config = ConfigParser.ConfigParser()
 Config.read("ucs.conf")
 checkSudo()
-checkService("Dropbox")
-checkService("Google")
-checkService("Box")
+x = 1
+while True:
+    try:
+        print (ConfigSectionMap('Account'+str(x))['provider'])
+        checkService('Account'+str(x))
+        x += 1
+    except:
+        break
+
+#checkService("Dropbox")
+#checkService("Google")
+#checkService("Box")
 
