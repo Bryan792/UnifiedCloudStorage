@@ -25,8 +25,8 @@ def checkService(service):
     if provider == "Box":
         DBConfig.set('auth','url',"https://dav.box.com/dav")
     elif provider == "Dropbox":
-        DBConfig.set('auth','consumer_key',"tmdmw3mh9ba199o")
-        DBConfig.set('auth','consumer_secret',"xqppu730x1f039r")
+        DBConfig.set('auth','consumer_key',"dG1kbXczbWg5YmExOTlv")
+        DBConfig.set('auth','consumer_secret',"eHFwcHU3MzB4MWYwMzly")
     with open('./'+service+'.ini', 'w') as configfile:
         DBConfig.write(configfile)
     if not os.path.exists(service):
