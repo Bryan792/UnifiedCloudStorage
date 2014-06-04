@@ -76,7 +76,7 @@ class UnifiedCloudStorage(Operations):
             error('NOT REACHED')
 
     def destroy_raid0(self, path):
-        def on_file(filename):
+        def on_file(root, filename):
             full_path = self._full_path(filename)
             contents = open(full_path, 'r').read()
 
@@ -114,7 +114,8 @@ class UnifiedCloudStorage(Operations):
         traverse(self.root, on_file, on_dir)
 
     def destroy_raid4(self, path):
-        def on_file(filename):
+        return
+        def on_file(root, filename):
             full_path = self._full_path(filename)
             contents = open(full_path, 'r').read()
 
@@ -181,7 +182,7 @@ class UnifiedCloudStorage(Operations):
             error('NOT REACHED')
 
     def init_raid0(self, path):
-        def on_file(filename):
+        def on_file(root, filename):
             # xor all files together
             contents = open(ufspath(self.roots[0], filename), 'r').read()
             for next_root in self.roots[1:]:
@@ -213,16 +214,22 @@ class UnifiedCloudStorage(Operations):
         traverse(ufspath(self.roots[0]), on_file, on_dir)
 
     def init_raid4(self, path):
-        def on_file(filename):
+        def on_file(root, filename):
             log('found ' + filename)
 
-            file_piece = fileToFilePiece(ufspath(self.roots[0], filename))
+            if os.path.isfile(self._full_path(''.join(filename.split('.')[:-2]))):
+                log('file ' + str(filename.split('.')[:-2][0]) + ' already constructed. skipping...')
+                return
+
+            file_piece = fileToFilePiece(root + '/' + filename)
             if file_piece.typ == 'raw':
                 other_file_pieces = { file_piece.numer: file_piece }
             else:
                 other_file_pieces = { 'xor': file_piece }
 
-            for other_root in self.roots[1:]:
+            for other_root in self.roots[0:]:
+                if(ufspath(other_root) == root):
+                    continue
                 temp = filename.split('.')
                 for i in range(1, file_piece.denom+1):
                     if i in other_file_pieces:
@@ -243,11 +250,13 @@ class UnifiedCloudStorage(Operations):
                             log('found %s in %s' % (new_filename, other_root))
                             other_file_pieces['xor'] = fileToFilePiece(ufspath(other_root, new_filename))
                             break
-                    else:
-                        error('no piece found for ' + filename)
+                    #else:
+                        #log('no piece found for ' + filename)
+                        #return
 
             if len(other_file_pieces) < file_piece.denom-1:
-                error('not enough pieces to recover ' + filename)
+                log('not enough pieces to recover ' + filename)
+                return
 
             for i in range(1,file_piece.denom+1):
                 if i not in other_file_pieces:
@@ -288,7 +297,8 @@ class UnifiedCloudStorage(Operations):
             log('Created ' + full_path)
 
         log('INIT: ' + path)
-        traverse(ufspath(self.roots[0]), on_file, on_dir)
+        for other_root in self.roots[0:]:
+            traverse(ufspath(other_root), on_file, on_dir)
 
     def link(self, target, name):
         log('LINK ' + path)
