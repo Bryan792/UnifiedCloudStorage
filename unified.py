@@ -42,12 +42,17 @@ def validateRootDirs(directories):
             error("directory tree mismatch: %s, %s" % (firstDict[0], otherDict[0]))
 
 class UnifiedCloudStorage(Operations):
-    def __init__(self, roots):
+    def __init__(self, raidver, roots):
+        if raidver == '--raid0':
+            self.raid = 0
+        elif raidver == '--raid4':
+            self.raid = 4
+        else:
+            error('Unrecognized RAID flag: ' + raidver)
+
         self.root = tempfile.mkdtemp()
         self.roots = roots
-        log('Created root directory ' + self.root)
-
-        validateRootDirs(roots)
+        log('Created pass-through filesystem at ' + self.root)
 
     def _full_path(self, partial):
         if partial.startswith("/"):
@@ -63,8 +68,52 @@ class UnifiedCloudStorage(Operations):
         return os.open(full_path, os.O_WRONLY | os.O_CREAT, mode)
 
     def destroy(self, path):
+        if self.raid == 0:
+            self.destroy_raid0(path)
+        elif self.raid == 4:
+            self.destroy_raid4(path)
+        else:
+            error('NOT REACHED')
+
+    def destroy_raid0(self, path):
+        def on_file(filename):
+            full_path = self._full_path(filename)
+            contents = open(full_path, 'r').read()
+
+            random_bits = []
+            for directory in self.roots[1:]:
+                ufs_path = ufspath(directory, filename)
+                bits = os.urandom(len(contents))
+
+                with open(ufs_path, 'w') as handle:
+                    log('Writing ' + ufs_path)
+                    handle.write(bits)
+
+                random_bits.append(bits)
+
+            ufs_path = ufspath(self.roots[0], filename)
+            with open(ufs_path, 'w') as handle:
+                log('Writing ' + ufs_path)
+                handle.write(xor_strings(contents, *random_bits))
+
+        def on_dir(dirname):
+            for directory in self.roots:
+                ufs_path = ufspath(directory, dirname)
+                log('Making ' + ufs_path)
+                os.mkdir(ufs_path)
+
         log('DESTROY ' + path)
 
+        # Delete roots' files, re-build from scratch
+        for directory in self.roots:
+            ufs_path = ufspath(directory)
+            log('Removing ' + ufs_path)
+            shutil.rmtree(ufs_path)
+            os.mkdir(ufs_path)
+
+        traverse(self.root, on_file, on_dir)
+
+    def destroy_raid4(self, path):
         def on_file(filename):
             full_path = self._full_path(filename)
             contents = open(full_path, 'r').read()
@@ -124,6 +173,14 @@ class UnifiedCloudStorage(Operations):
             ))
 
     def init(self, path):
+        if self.raid == 0:
+            self.init_raid0(path)
+        elif self.raid == 4:
+            self.init_raid4(path)
+        else:
+            error('NOT REACHED')
+
+    def init_raid0(self, path):
         def on_file(filename):
             # xor all files together
             contents = open(ufspath(self.roots[0], filename), 'r').read()
@@ -145,6 +202,85 @@ class UnifiedCloudStorage(Operations):
                 dest.write(contents)
 
             log('Wrote ' + full_path)
+
+        def on_dir(dirname):
+            full_path = self._full_path(dirname)
+            os.mkdir(full_path)
+            log('Created ' + full_path)
+
+        log('INIT: ' + path)
+        validateRootDirs(roots)
+        traverse(ufspath(self.roots[0]), on_file, on_dir)
+
+    def init_raid4(self, path):
+        def on_file(filename):
+            log('found ' + filename)
+
+            file_piece = fileToFilePiece(ufspath(self.roots[0], filename))
+            if file_piece.typ == 'raw':
+                other_file_pieces = { file_piece.numer: file_piece }
+            else:
+                other_file_pieces = { 'xor': file_piece }
+
+            for other_root in self.roots[1:]:
+                temp = filename.split('.')
+                for i in range(1, file_piece.denom+1):
+                    if i in other_file_pieces:
+                        continue
+
+                    temp[-2] = str(i)
+                    new_filename = '.'.join(temp)
+                    if os.path.isfile(ufspath(other_root, new_filename)):
+                        log('found %s in %s' % (new_filename, other_root))
+                        new_file_piece = fileToFilePiece(ufspath(other_root, new_filename))
+                        other_file_pieces[new_file_piece.numer] = new_file_piece
+                        break
+                else:
+                    for i in range(0,file_piece.denom):
+                        temp[-2] = 'xor%d' % i
+                        new_filename = '.'.join(temp)
+                        if os.path.isfile(ufspath(other_root, new_filename)):
+                            log('found %s in %s' % (new_filename, other_root))
+                            other_file_pieces['xor'] = fileToFilePiece(ufspath(other_root, new_filename))
+                            break
+                    else:
+                        error('no piece found for ' + filename)
+
+            if len(other_file_pieces) < file_piece.denom-1:
+                error('not enough pieces to recover ' + filename)
+
+            for i in range(1,file_piece.denom+1):
+                if i not in other_file_pieces:
+                    log("didn't find piece %d of %s: reconstructing it now" % (i, file_piece.basename))
+
+                    extra_bytes = other_file_pieces['xor'].extra_bytes
+
+                    pieces_contents = []
+                    for piece in other_file_pieces.values():
+                        if piece.typ == 'raw' and piece.numer == file_piece.denom:
+                            log('appending %d bytes to piece %d before xor' % (extra_bytes, piece.denom))
+                            pieces_contents.append(
+                                    open(piece.path(), 'r').read()
+                                    + '\0'*extra_bytes)
+                        else:
+                            pieces_contents.append(open(piece.path(), 'r').read())
+
+                    piece_i_contents = xor_strings(*pieces_contents)
+                    if i == file_piece.denom:
+                        piece_i_contents = piece_i_contents[:-extra_bytes]
+
+                    log('writing piece %d to /tmp/foo.1.1' % i)
+                    with open('/tmp/foo.1.1', 'w') as temp_handle:
+                        temp_handle.write(xor_strings(*pieces_contents))
+
+                    other_file_pieces[i] = RawFilePiece('/tmp/foo', 1, 1)
+
+            full_path = self._full_path(''.join(filename.split('.')[:-2]))
+            log('reconstructing %s from pieces' % full_path)
+            with open(full_path, 'w') as dest:
+                for i in range(1, file_piece.denom+1):
+                    log('reconstructing using piece %d: %s' % (i, other_file_pieces[i].path()))
+                    dest.write(open(other_file_pieces[i].path(), 'r').read())
 
         def on_dir(dirname):
             full_path = self._full_path(dirname)
@@ -250,10 +386,10 @@ def log(*args):
     print(*args, file=sys.stderr)
 
 if __name__ == '__main__':
-    if len(sys.argv) < 4:
-        error('Usage: %s <mountpoint> [<sub-filesystems>]' % sys.argv[0])
+    if len(sys.argv) < 5:
+        error('Usage: %s [--raid0|--raid4] <mountpoint> [<sub-filesystems>]' % sys.argv[0])
 
     FUSE(
-        UnifiedCloudStorage(sys.argv[2:]),
-        sys.argv[1],
+        UnifiedCloudStorage(sys.argv[1], sys.argv[3:]),
+        sys.argv[2],
         foreground=True)
