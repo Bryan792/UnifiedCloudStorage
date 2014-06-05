@@ -102,8 +102,6 @@ class UnifiedCloudStorage(Operations):
                 log('Making ' + ufs_path)
                 os.mkdir(ufs_path)
 
-        log('DESTROY ' + path)
-
         # Delete roots' files, re-build from scratch
         for directory in self.roots:
             ufs_path = ufspath(directory)
@@ -119,27 +117,39 @@ class UnifiedCloudStorage(Operations):
             full_path = self._full_path(filename)
             contents = open(full_path, 'r').read()
 
-            random_bits = []
-            for directory in self.roots[1:]:
-                ufs_path = ufspath(directory, filename)
-                bits = os.urandom(len(contents))
+            num_roots = len(self.roots)
 
-                with open(ufs_path, 'w') as handle:
-                    log('Writing ' + ufs_path)
-                    handle.write(bits)
+            # 3 roots means split into 2 pieces: each piece is (x+1)/2 bytes long
+            chunk_size = (len(contents) + num_roots-2) / (num_roots-1)
+            chunks = []
+            for i in range(1, num_roots):
+                fromIndex = 0 + (i-1)*chunk_size
+                toIndex = fromIndex + chunk_size
+                chunk = contents[fromIndex:toIndex]
+                chunks.append(chunk)
 
-                random_bits.append(bits)
+                dest_file = ufspath(self.roots[i], '%s.%s.%s' % (filename, i, num_roots-1))
+                with open(dest_file, 'w') as handle:
+                    log('writing %s[%d:%d] to %s' % (filename, fromIndex, toIndex, dest_file))
+                    handle.write(chunk)
 
-            ufs_path = ufspath(self.roots[0], filename)
-            with open(ufs_path, 'w') as handle:
-                log('Writing ' + ufs_path)
-                handle.write(xor_strings(contents, *random_bits))
+            # Pad last chunk with extra 0s
+            padding = len(chunks[0]) - len(chunks[-1])
+            log('Padding last chunk with %d bytes for xor' % padding)
+            chunks[-1] = chunks[-1] + '\0' * padding
+
+            dest_file = ufspath(self.roots[0], '%s.xor%d.%s' % (filename, padding, num_roots-1))
+            with open(dest_file, 'w') as handle:
+                log('writing %s' % dest_file)
+                handle.write(xor_strings(*chunks))
 
         def on_dir(dirname):
             for directory in self.roots:
                 ufs_path = ufspath(directory, dirname)
                 log('Making ' + ufs_path)
                 os.mkdir(ufs_path)
+
+        log('DESTROY ' + path)
 
         # Delete roots' files, re-build from scratch
         for directory in self.roots:
