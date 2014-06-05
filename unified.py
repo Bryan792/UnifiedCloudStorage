@@ -7,10 +7,82 @@ import os
 import shutil
 import sys
 import tempfile
+import random
+import struct 
 
 from fuse import FUSE, FuseOSError, Operations
 
 from utils import *
+
+from Crypto.Cipher import AES
+import hashlib
+
+def encrypt_file(key, in_filename, out_filename=None, chunksize=64*1024):
+    """ Encrypts a file using AES (CBC mode) with the
+        given key.
+
+        key:
+            The encryption key - a string that must be
+            either 16, 24 or 32 bytes long. Longer keys
+            are more secure.
+
+        in_filename:
+            Name of the input file
+
+        out_filename:
+            If None, '<in_filename>.enc' will be used.
+
+        chunksize:
+            Sets the size of the chunk which the function
+            uses to read and encrypt the file. Larger chunk
+            sizes can be faster for some files and machines.
+            chunksize must be divisible by 16.
+    """
+    if not out_filename:
+        out_filename = in_filename + '.enc'
+
+    iv = ''.join(chr(random.randint(0, 0xFF)) for i in range(16))
+    encryptor = AES.new(key, AES.MODE_CBC, iv)
+    filesize = os.path.getsize(in_filename)
+
+    with open(in_filename, 'rb') as infile:
+        with open(out_filename, 'wb') as outfile:
+            outfile.write(struct.pack('<Q', filesize))
+            outfile.write(iv)
+
+            while True:
+                chunk = infile.read(chunksize)
+                if len(chunk) == 0:
+                    break
+                elif len(chunk) % 16 != 0:
+                    chunk += ' ' * (16 - len(chunk) % 16)
+
+                outfile.write(encryptor.encrypt(chunk))
+
+def decrypt_file(key, in_filename, out_filename=None, chunksize=24*1024):
+    """ Decrypts a file using AES (CBC mode) with the
+        given key. Parameters are similar to encrypt_file,
+        with one difference: out_filename, if not supplied
+        will be in_filename without its last extension
+        (i.e. if in_filename is 'aaa.zip.enc' then
+        out_filename will be 'aaa.zip')
+    """
+    if not out_filename:
+        out_filename = os.path.splitext(in_filename)[0]
+
+    with open(in_filename, 'rb') as infile:
+        origsize = struct.unpack('<Q', infile.read(struct.calcsize('Q')))[0]
+        iv = infile.read(16)
+        decryptor = AES.new(key, AES.MODE_CBC, iv)
+
+        with open(out_filename, 'wb') as outfile:
+            while True:
+                chunk = infile.read(chunksize)
+                if len(chunk) == 0:
+                    break
+                outfile.write(decryptor.decrypt(chunk))
+
+            outfile.truncate(origsize)
 
 # ufspath('foo') = 'foo/.ufs'
 # ufspath('foo', 'bar/baz' = 'foo/.ufs/bar/baz'
@@ -45,13 +117,15 @@ class UnifiedCloudStorage(Operations):
     def __init__(self, raidver, roots):
         if raidver == '--raid0':
             self.raid = 0
+            self.roots = roots
         elif raidver == '--raid4':
             self.raid = 4
+            self.roots = roots[1:]
+            self.key = hashlib.sha256(roots[0]).digest()
         else:
             error('Unrecognized RAID flag: ' + raidver)
-
         self.root = tempfile.mkdtemp()
-        self.roots = roots
+        #self.roots = roots
         log('Created pass-through filesystem at ' + self.root)
 
     def _full_path(self, partial):
@@ -114,7 +188,9 @@ class UnifiedCloudStorage(Operations):
     def destroy_raid4(self, path):
         def on_file(root, filename):
             full_path = self._full_path(filename)
-            contents = open(full_path, 'r').read()
+            encrypt_file(self.key, full_path, full_path + ".enc")
+            os.remove(full_path)
+            contents = open(full_path + ".enc", 'r').read()
 
             num_roots = len(self.roots)
 
@@ -138,7 +214,7 @@ class UnifiedCloudStorage(Operations):
             chunks[-1] = chunks[-1] + '\0' * padding
 
             dest_file = ufspath(self.roots[0], '%s.xor%d.%s' % (filename, padding, num_roots-1))
-            with open(dest_file, 'w') as handle:
+            with open(dest_file , 'w') as handle:
                 log('writing %s' % dest_file)
                 handle.write(xor_strings(*chunks))
 
@@ -226,7 +302,7 @@ class UnifiedCloudStorage(Operations):
         def on_file(root, filename):
             log('found ' + filename)
 
-            if os.path.isfile(self._full_path(''.join(filename.split('.')[:-2]))):
+            if os.path.isfile(self._full_path('.'.join(filename.split('.')[:-2]))):
                 log('file ' + str(filename.split('.')[:-2][0]) + ' already constructed. skipping...')
                 return
 
@@ -293,12 +369,14 @@ class UnifiedCloudStorage(Operations):
 
                     other_file_pieces[i] = RawFilePiece('/tmp/foo', 1, 1)
 
-            full_path = self._full_path(''.join(filename.split('.')[:-2]))
+            full_path = self._full_path('.'.join(filename.split('.')[:-2]))
             log('reconstructing %s from pieces' % full_path)
-            with open(full_path, 'w') as dest:
+            with open(full_path + ".enc", 'w') as dest:
                 for i in range(1, file_piece.denom+1):
                     log('reconstructing using piece %d: %s' % (i, other_file_pieces[i].path()))
                     dest.write(open(other_file_pieces[i].path(), 'r').read())
+            decrypt_file(self.key, full_path+".enc")
+            os.remove(full_path+".enc")
 
         def on_dir(dirname):
             full_path = self._full_path(dirname)
