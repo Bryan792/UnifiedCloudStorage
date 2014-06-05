@@ -8,7 +8,7 @@ import shutil
 import sys
 import tempfile
 import random
-import struct 
+import struct
 
 from fuse import FUSE, FuseOSError, Operations
 
@@ -112,6 +112,8 @@ def validateRootDirs(directories):
     for otherDict in dicts[1:]:
         if not firstDict[1] == otherDict[1]:
             error("directory tree mismatch: %s, %s" % (firstDict[0], otherDict[0]))
+
+    log('ok.')
 
 class UnifiedCloudStorage(Operations):
     def __init__(self, raidver, roots):
