@@ -484,7 +484,7 @@ def log(*args):
 
 if __name__ == '__main__':
     if len(sys.argv) < 5:
-        error('Usage: %s [--raid0|--raid4] <mountpoint> [<sub-filesystems>]' % sys.argv[0])
+        error('Usage: %s [--raid0|--raid4] <mountpoint> [if raid4 then KEYPHRASE] [<sub-filesystems>]' % sys.argv[0])
 
     FUSE(
         UnifiedCloudStorage(sys.argv[1], sys.argv[3:]),
