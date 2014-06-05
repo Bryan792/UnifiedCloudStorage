@@ -295,7 +295,7 @@ class UnifiedCloudStorage(Operations):
             log('Created ' + full_path)
 
         log('INIT: ' + path)
-        validateRootDirs(roots)
+        validateRootDirs(self.roots)
         traverse(ufspath(self.roots[0]), on_file, on_dir)
 
     def init_raid4(self, path):
