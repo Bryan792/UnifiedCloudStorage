@@ -112,7 +112,6 @@ class UnifiedCloudStorage(Operations):
         traverse(self.root, on_file, on_dir)
 
     def destroy_raid4(self, path):
-        return
         def on_file(root, filename):
             full_path = self._full_path(filename)
             contents = open(full_path, 'r').read()
