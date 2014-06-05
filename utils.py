@@ -89,7 +89,7 @@ def fileToFilePiece(filename):
         raise Exception('bad filename: ' + filename)
 
     # foobar/foo.txt.1.4 -> foobar/foo.txt
-    orig_filename = os.path.join(dirname, ''.join(split_basename[:-2]))
+    orig_filename = os.path.join(dirname, '.'.join(split_basename[:-2]))
 
     if split_basename[-2].startswith('xor'):
         return XorFilePiece(
